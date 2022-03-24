@@ -22,5 +22,5 @@ docker-compose up -d
 
 ```shell
 docker-compose up -d
-url -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
+curl -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
 ```
