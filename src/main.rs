@@ -5,7 +5,6 @@ use axum::{
 
 use gitlab::api::projects::merge_requests::MergeRequest;
 use gitlab::api::projects::pipelines::PipelineJobs;
-//use gitlab::api::{self, projects, Query};
 use gitlab::api::AsyncQuery;
 use gitlab::types::Job as JobType;
 use gitlab::types::MergeRequest as MergeRequestType;
