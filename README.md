@@ -12,6 +12,7 @@ The environment variables required are
 * `GITLAB_API_TOKEN`
 * `GITLAB_API_HOSTNAME`
 * `SLACK_API_TOKEN`
+* `SLACK_CHANNEL`
 
 ```shell
 docker-compose up -d
@@ -21,5 +22,5 @@ docker-compose up -d
 
 ```shell
 docker-compose up -d
-url -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
+curl -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
 ```
