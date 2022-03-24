@@ -1,0 +1,17 @@
+version: '2'
+
+services:
+
+  gitlab_pipeline_annoyer:
+    container_name: gitlab_pipeline_annoyer
+    build: .
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - "TZ=Pacific/Auckland"
+      - "RUST_LOG=info"
+      - "SLACK_API_TOKEN=${SLACK_API_TOKEN}"
+      - "SLACK_CHANNEL=${SLACK_CHANNEL}"
+      - "GITLAB_API_HOSTNAME=${GITLAB_API_HOSTNAME}"
+      - "GITLAB_API_TOKEN=${GITLAB_API_TOKEN}"
