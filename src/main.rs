@@ -11,7 +11,9 @@ use gitlab::types::MergeRequest as MergeRequestType;
 use gitlab::webhooks::WebHook;
 use gitlab::{AsyncGitlab, GitlabBuilder, StatusState};
 use slack::chat::PostMessageRequest;
+use slack::users::{InfoRequest, InfoResponse};
 use slack_api as slack;
+use slack_api::User;
 use std::env;
 use std::sync::Arc;
 #[macro_use]
@@ -116,11 +118,45 @@ async fn webhook(
                     )
                     .as_str(),
                 );
-                slack_message
-                    .push_str(format!("Author: @{}\n", merge_request.author.username).as_str());
+
+                let author_info_request = InfoRequest {
+                    user: &merge_request.author.username,
+                };
+                let author_slack_id = match slack::users::info(
+                    &state.slack_client,
+                    &state.slack_token,
+                    &author_info_request,
+                )
+                .await
+                {
+                    Ok(InfoResponse {
+                        user: Some(User { id: Some(id), .. }),
+                        ..
+                    }) => id,
+                    _ => merge_request.author.username.clone(),
+                };
+
+                slack_message.push_str(format!("Author: <@{}>\n", author_slack_id).as_str());
                 if let Some(merged_by) = merge_request.merged_by {
+                    let merged_by_info_request = InfoRequest {
+                        user: &merged_by.username,
+                    };
+                    let merged_by_slack_id = match slack::users::info(
+                        &state.slack_client,
+                        &state.slack_token,
+                        &merged_by_info_request,
+                    )
+                    .await
+                    {
+                        Ok(InfoResponse {
+                            user: Some(User { id: Some(id), .. }),
+                            ..
+                        }) => id,
+                        _ => merge_request.author.username.clone(),
+                    };
+
                     slack_message
-                        .push_str(format!("Merged by: @{}\n", merged_by.username).as_str());
+                        .push_str(format!("Merged by: <@{}>\n", merged_by_slack_id).as_str());
                 }
                 slack_message.push_str("Failed jobs\n");
                 for (n, s, url) in failed {
@@ -139,7 +175,7 @@ async fn webhook(
                 slack::chat::post_message(slack_client, slack_token, &message_request)
                     .await
                     .map_err(|e| {
-                        error!("Slack error {:?}", e);
+                        error!("Slack error {:?}", (e, slack_token, message_request));
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
                 info!("Slacked: {}", &slack_message);
