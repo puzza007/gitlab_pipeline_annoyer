@@ -77,109 +77,77 @@ async fn webhook(
                 return Ok(StatusCode::OK);
             }
 
-            let gitlab_client = &state.gitlab_client;
-            if let Some(merge_request) = pipelinehook.merge_request {
-                let merge_request_id = merge_request.id.value();
+            // Skip pipelines without an MR
+            let merge_request = pipelinehook.merge_request.ok_or(StatusCode::OK)?;
 
-                let endpoint = PipelineJobs::builder()
-                    .project(project_id)
-                    .pipeline(pipeline_id)
-                    .build()
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let merge_request_id = merge_request.id.value();
 
-                let endpoint = gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(300));
-                let jobs: Vec<JobType> = endpoint
-                    .query_async(gitlab_client)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                let mut failed = Vec::new();
-                for job in jobs {
-                    if job.status != StatusState::Success {
-                        failed.push((job.name.clone(), job.status, job.web_url.clone()));
-                    }
-                }
+            let endpoint = PipelineJobs::builder()
+                .project(project_id)
+                .pipeline(pipeline_id)
+                .build()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-                let merge_request_endpoint = MergeRequest::builder()
-                    .project(project_id)
-                    .merge_request(merge_request_id)
-                    .build()
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-                let merge_request: MergeRequestType = merge_request_endpoint
-                    .query_async(gitlab_client)
-                    .await
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-                let mut slack_message = String::new();
-                slack_message.push_str(
-                    format!(
-                        "Failed MR: <{}|{}>\n",
-                        merge_request.web_url, merge_request.title
-                    )
-                    .as_str(),
-                );
-
-                let author_info_request = InfoRequest {
-                    user: &merge_request.author.username,
-                };
-                let author_slack_id = match slack::users::info(
-                    &state.slack_client,
-                    &state.slack_token,
-                    &author_info_request,
-                )
+            let endpoint = gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(300));
+            let jobs: Vec<JobType> = endpoint
+                .query_async(&state.gitlab_client)
                 .await
-                {
-                    Ok(InfoResponse {
-                        user: Some(User { id: Some(id), .. }),
-                        ..
-                    }) => id,
-                    _ => merge_request.author.username.clone(),
-                };
-
-                slack_message.push_str(format!("Author: <@{}>\n", author_slack_id).as_str());
-                if let Some(merged_by) = merge_request.merged_by {
-                    let merged_by_info_request = InfoRequest {
-                        user: &merged_by.username,
-                    };
-                    let merged_by_slack_id = match slack::users::info(
-                        &state.slack_client,
-                        &state.slack_token,
-                        &merged_by_info_request,
-                    )
-                    .await
-                    {
-                        Ok(InfoResponse {
-                            user: Some(User { id: Some(id), .. }),
-                            ..
-                        }) => id,
-                        _ => merge_request.author.username.clone(),
-                    };
-
-                    slack_message
-                        .push_str(format!("Merged by: <@{}>\n", merged_by_slack_id).as_str());
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let mut failed = Vec::new();
+            for job in jobs {
+                if job.status != StatusState::Success {
+                    failed.push((job.name.clone(), job.status, job.web_url.clone()));
                 }
-                slack_message.push_str("Failed jobs\n");
-                for (n, s, url) in failed {
-                    slack_message.push_str(format!("- <{}|{}> {:?}\n", url, n, s).as_str());
-                }
-
-                // Send message to slack
-                let slack_client = &state.slack_client;
-                let slack_token = &state.slack_token;
-                let message_request = PostMessageRequest {
-                    channel: &state.slack_channel,
-                    text: &slack_message,
-                    ..PostMessageRequest::default()
-                };
-
-                slack::chat::post_message(slack_client, slack_token, &message_request)
-                    .await
-                    .map_err(|e| {
-                        error!("Slack error {:?}", (e, slack_token, message_request));
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?;
-                info!("Slacked: {}", &slack_message);
             }
+
+            let merge_request_endpoint = MergeRequest::builder()
+                .project(project_id)
+                .merge_request(merge_request_id)
+                .build()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let merge_request: MergeRequestType = merge_request_endpoint
+                .query_async(&state.gitlab_client)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let mut slack_message = String::new();
+            slack_message.push_str(
+                format!(
+                    "Failed MR: <{}|{}>\n",
+                    merge_request.web_url, merge_request.title
+                )
+                .as_str(),
+            );
+
+            let author_slack_id = get_slack_user_id(&state, &merge_request.author.username).await;
+            slack_message.push_str(format!("Author: <@{}>\n", author_slack_id).as_str());
+
+            if let Some(merged_by) = merge_request.merged_by {
+                let merged_by_slack_id = get_slack_user_id(&state, &merged_by.username).await;
+
+                slack_message.push_str(format!("Merged by: <@{}>\n", merged_by_slack_id).as_str());
+            }
+            slack_message.push_str("Failed jobs\n");
+            for (n, s, url) in failed {
+                slack_message.push_str(format!("- <{}|{}> {:?}\n", url, n, s).as_str());
+            }
+
+            let slack_client = &state.slack_client;
+            let slack_token = &state.slack_token;
+            let message_request = PostMessageRequest {
+                channel: &state.slack_channel,
+                text: &slack_message,
+                ..PostMessageRequest::default()
+            };
+
+            slack::chat::post_message(slack_client, slack_token, &message_request)
+                .await
+                .map_err(|e| {
+                    error!("Slack error {:?}", (e, slack_token, message_request));
+                    StatusCode::INTERNAL_SERVER_ERROR
+                })?;
+            info!("Slacked: {}", &slack_message);
 
             Ok(StatusCode::OK)
         }
@@ -191,5 +159,22 @@ async fn webhook(
             error!("Got something unexpected {:?}", err);
             Err(StatusCode::OK)
         }
+    }
+}
+
+async fn get_slack_user_id(state: &State, username: &str) -> String {
+    let author_info_request = InfoRequest { user: username };
+    match slack::users::info(
+        &state.slack_client,
+        &state.slack_token,
+        &author_info_request,
+    )
+    .await
+    {
+        Ok(InfoResponse {
+            user: Some(User { id: Some(id), .. }),
+            ..
+        }) => id,
+        _ => username.to_string(),
     }
 }
