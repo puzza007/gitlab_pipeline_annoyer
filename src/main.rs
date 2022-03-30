@@ -39,10 +39,10 @@ async fn main() -> Result<()> {
         env::var("GITLAB_API_HOSTNAME").expect("Missing GITLAB_API_HOSTNAME env var");
 
     info!("Connecting to gitlab...");
-    let gitlab_client = GitlabBuilder::new(gitlab_api_hostname, gitlab_api_token)
+    let gitlab_client = GitlabBuilder::new(&gitlab_api_hostname, gitlab_api_token)
         .build_async()
         .await
-        .context("Couldn't connect to gitlab: {gitlab_api_hostname}")?;
+        .context(format!("Couldn't connect to gitlab: {gitlab_api_hostname}"))?;
 
     let slack_client = slack::default_client().unwrap();
 
