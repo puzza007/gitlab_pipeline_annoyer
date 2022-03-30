@@ -12,3 +12,4 @@ env_logger = "0.9.0"
 serde = "1.0.136"
 slack_api = { git = "https://github.com/puzza007/slack-rs-api.git" }
 reqwest = "0.11.10"
+anyhow = "1.0.56"

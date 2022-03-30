@@ -18,6 +18,7 @@ use std::env;
 use std::sync::Arc;
 #[macro_use]
 extern crate log;
+use anyhow::{Context, Result};
 
 struct State {
     gitlab_client: AsyncGitlab,
@@ -27,19 +28,21 @@ struct State {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     env_logger::init();
 
-    info!("Starting");
+    info!("Reading env vars...");
     let gitlab_api_token = env::var("GITLAB_API_TOKEN").expect("Missing GITLAB_API_TOKEN env var");
     let slack_api_token = env::var("SLACK_API_TOKEN").expect("Missing SLACK_API_TOKEN env var");
     let slack_channel = env::var("SLACK_CHANNEL").expect("Missing SLACK_CHANNEL env var");
     let gitlab_api_hostname =
         env::var("GITLAB_API_HOSTNAME").expect("Missing GITLAB_API_HOSTNAME env var");
+
+    info!("Connecting to gitlab...");
     let gitlab_client = GitlabBuilder::new(gitlab_api_hostname, gitlab_api_token)
         .build_async()
         .await
-        .unwrap();
+        .context("Couldn't connect to gitlab: {gitlab_api_hostname}")?;
 
     let slack_client = slack::default_client().unwrap();
 
@@ -54,10 +57,13 @@ async fn main() {
         .route("/", post(webhook))
         .layer(Extension(shared_state));
 
+    info!("Starting web server...");
     axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
         .serve(app.into_make_service())
         .await
-        .unwrap();
+        .context("Couldn't start server on 0.0.0.0:3000")?;
+
+    Ok(())
 }
 
 async fn webhook(
