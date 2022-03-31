@@ -3,8 +3,9 @@ use axum::{
     response::IntoResponse, routing::post, Json, Router,
 };
 
-use gitlab::api::projects::merge_requests::MergeRequest;
+
 use gitlab::api::projects::pipelines::PipelineJobs;
+use gitlab::api::projects::repository::commits::{MergeRequests};
 use gitlab::api::AsyncQuery;
 use gitlab::types::Job as JobType;
 use gitlab::types::MergeRequest as MergeRequestType;
@@ -66,10 +67,10 @@ async fn webhook(
 ) -> Result<impl IntoResponse, StatusCode> {
     match payload {
         Ok(Json(WebHook::Pipeline(pipelinehook))) => {
-            info!("Pipeline received");
             let pipeline_id = pipelinehook.object_attributes.id.value();
             let project_id = pipelinehook.project.id.value();
             let pipeline_status = pipelinehook.object_attributes.status;
+            info!("Pipeline {} received", pipeline_id);
             info!("Pipeline status: {:?}", pipeline_status);
 
             if pipeline_status != StatusState::Failed {
@@ -77,10 +78,23 @@ async fn webhook(
                 return Ok(StatusCode::OK);
             }
 
-            // Skip pipelines without an MR
-            let merge_request = pipelinehook.merge_request.ok_or(StatusCode::OK)?;
+            info!("Checking if pipeline has an MR");
 
-            let merge_request_id = merge_request.id.value();
+            let commit_id = pipelinehook.commit.ok_or(StatusCode::OK)?.id.value().to_string();
+            let commit_merge_requests_endpoint = MergeRequests::builder()
+                .project(project_id)
+                .sha(commit_id)
+                .build()
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let commit_merge_requests: Vec<MergeRequestType> = commit_merge_requests_endpoint
+                .query_async(&state.gitlab_client)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+            let merge_request = commit_merge_requests.first().ok_or(StatusCode::OK)?;
+
+            info!("Pipeline has an MR");
 
             let endpoint = PipelineJobs::builder()
                 .project(project_id)
@@ -95,21 +109,10 @@ async fn webhook(
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let mut failed = Vec::new();
             for job in jobs {
-                if job.status != StatusState::Success {
+                if job.status == StatusState::Failed {
                     failed.push((job.name.clone(), job.status, job.web_url.clone()));
                 }
             }
-
-            let merge_request_endpoint = MergeRequest::builder()
-                .project(project_id)
-                .merge_request(merge_request_id)
-                .build()
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-
-            let merge_request: MergeRequestType = merge_request_endpoint
-                .query_async(&state.gitlab_client)
-                .await
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
             let mut slack_message = String::new();
             slack_message.push_str(
@@ -123,7 +126,7 @@ async fn webhook(
             let author_slack_id = get_slack_user_id(&state, &merge_request.author.username).await;
             slack_message.push_str(format!("Author: <@{}>\n", author_slack_id).as_str());
 
-            if let Some(merged_by) = merge_request.merged_by {
+            if let Some(merged_by) = &merge_request.merged_by {
                 let merged_by_slack_id = get_slack_user_id(&state, &merged_by.username).await;
 
                 slack_message.push_str(format!("Merged by: <@{}>\n", merged_by_slack_id).as_str());
