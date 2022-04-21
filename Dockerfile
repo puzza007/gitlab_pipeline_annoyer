@@ -14,7 +14,7 @@ RUN rm ./target/release/deps/gitlab_pipeline_annoyer*
 RUN cargo build --release
 
 
-FROM debian:bullseye-slim
+FROM debian:11-slim
 ARG APP=/usr/src/app
 
 RUN apt-get update \
