@@ -1,5 +1,5 @@
 # Build Stage
-FROM rust:1.63.0 as builder
+FROM rust:1 as builder
 
 RUN USER=root cargo new --bin gitlab_pipeline_annoyer
 WORKDIR ./gitlab_pipeline_annoyer
