@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-gitlab = "0.1502.0"
+gitlab = "0.1610.0"
 axum = { version = "0.6.7", features = ["headers", "http2", "multipart"] }
 tokio = { version = "1.20", features = ["full"] }
 log = "0.4"

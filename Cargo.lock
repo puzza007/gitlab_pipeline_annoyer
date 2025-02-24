@@ -33,6 +33,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "android-tzdata"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e999941b234f3131b00bc13c22d06e8c5ff726d1b6318ac7eb276997bbb4fef0"
+
+[[package]]
 name = "android_system_properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -229,17 +235,15 @@ checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
 name = "chrono"
-version = "0.4.21"
+version = "0.4.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f725f340c3854e3cb3ab736dc21f0cca183303acea3b3ffec30f141503ac8eb"
+checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
+ "android-tzdata",
  "iana-time-zone",
- "js-sys",
- "num-integer",
  "num-traits",
  "serde",
- "wasm-bindgen",
- "winapi",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -287,6 +291,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b540bd8bc810d3885c6ea91e2018302f68baba2129ab3e88f32389ee9370880d"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "cron"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f8c3e73077b4b4a6ab1ea5047c37c57aee77657bc8ecd6f29b0af082d0b0c07"
+dependencies = [
+ "chrono",
+ "nom",
+ "once_cell",
 ]
 
 [[package]]
@@ -536,21 +551,21 @@ checksum = "07e28edb80900c19c28f1072f2e8aeca7fa06b23cd4169cefe1af5aa3260783f"
 
 [[package]]
 name = "gitlab"
-version = "0.1502.0"
+version = "0.1610.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a97beb962ae9352263e3d1e40246932160d0c35dc23baf85e4645afeddc44be2"
+checksum = "d6c802fc7eb82ff5ba2e4447c5acd0f18ec1b7bb95dbe95b6d77639e25be7cbe"
 dependencies = [
  "async-trait",
  "base64 0.13.0",
  "bytes",
  "chrono",
+ "cron",
  "derive_builder",
  "futures-util",
  "graphql_client",
  "http",
  "itertools",
  "log",
- "openssl",
  "percent-encoding",
  "reqwest",
  "serde",
@@ -558,7 +573,6 @@ dependencies = [
  "serde_urlencoded",
  "thiserror",
  "url",
- "void",
 ]
 
 [[package]]
@@ -928,6 +942,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a60c7ce501c71e03a9c9c0d35b861413ae925bd979cc7a4e30d060069aaac8d"
 
 [[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
 name = "miniz_oxide"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -993,13 +1013,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "num-integer"
-version = "0.1.45"
+name = "nom"
+version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "225d3389fb3509a24c93f5c29eb6bde2586b98d9f016636dff58d7c6f7569cd9"
+checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
- "autocfg",
- "num-traits",
+ "memchr",
+ "minimal-lexical",
 ]
 
 [[package]]
