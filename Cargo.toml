@@ -8,7 +8,7 @@ gitlab = "0.1610.0"
 axum = { version = "0.6.7", features = ["headers", "http2", "multipart"] }
 tokio = { version = "1.20", features = ["full"] }
 log = "0.4"
-env_logger = "0.9"
+env_logger = "0.11"
 serde = "1.0"
 slack_api = { git = "https://github.com/puzza007/slack-rs-api.git" }
 reqwest = "0.11"
