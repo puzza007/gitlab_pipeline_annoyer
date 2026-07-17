@@ -3,14 +3,11 @@ use axum::{
     response::IntoResponse, routing::post, Json, Router,
 };
 
-
 use gitlab::api::projects::pipelines::PipelineJobs;
-use gitlab::api::projects::repository::commits::{MergeRequests};
+use gitlab::api::projects::repository::commits::MergeRequests;
 use gitlab::api::AsyncQuery;
-use gitlab::types::Job as JobType;
-use gitlab::types::MergeRequest as MergeRequestType;
-use gitlab::webhooks::WebHook;
-use gitlab::{AsyncGitlab, GitlabBuilder, StatusState};
+use gitlab::{AsyncGitlab, GitlabBuilder};
+use serde::Deserialize;
 use slack::chat::PostMessageRequest;
 use slack::users::{InfoRequest, InfoResponse};
 use slack_api as slack;
@@ -20,6 +17,51 @@ use std::sync::Arc;
 #[macro_use]
 extern crate log;
 use anyhow::{Context, Result};
+
+// The gitlab crate no longer ships webhook payload or API response types;
+// clients are expected to define structs for the fields they use.
+#[derive(Debug, Deserialize)]
+struct PipelineHook {
+    object_attributes: PipelineAttributes,
+    project: Project,
+    commit: Option<Commit>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PipelineAttributes {
+    id: u64,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Project {
+    id: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct Commit {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Job {
+    name: String,
+    status: String,
+    web_url: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct MergeRequest {
+    title: String,
+    web_url: String,
+    author: UserBrief,
+    merged_by: Option<UserBrief>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserBrief {
+    username: String,
+}
 
 struct State {
     gitlab_client: AsyncGitlab,
@@ -68,32 +110,42 @@ async fn main() -> Result<()> {
 }
 
 async fn webhook(
-    payload: Result<Json<WebHook>, JsonRejection>,
     Extension(state): Extension<Arc<State>>,
+    payload: Result<Json<serde_json::Value>, JsonRejection>,
 ) -> Result<impl IntoResponse, StatusCode> {
     match payload {
-        Ok(Json(WebHook::Pipeline(pipelinehook))) => {
-            let pipeline_id = pipelinehook.object_attributes.id.value();
-            let project_id = pipelinehook.project.id.value();
+        Ok(Json(value)) => {
+            if value.get("object_kind").and_then(|k| k.as_str()) != Some("pipeline") {
+                info!("Not a pipeline. Skipping.");
+                return Ok(StatusCode::OK);
+            }
+
+            let pipelinehook: PipelineHook = serde_json::from_value(value).map_err(|err| {
+                error!("Couldn't parse pipeline hook: {:?}", err);
+                StatusCode::OK
+            })?;
+
+            let pipeline_id = pipelinehook.object_attributes.id;
+            let project_id = pipelinehook.project.id;
             let pipeline_status = pipelinehook.object_attributes.status;
             info!("Pipeline {} received", pipeline_id);
-            info!("Pipeline status: {:?}", pipeline_status);
+            info!("Pipeline status: {}", pipeline_status);
 
-            if pipeline_status != StatusState::Failed {
+            if pipeline_status != "failed" {
                 info!("Pipeline status not failure. Skipping.");
                 return Ok(StatusCode::OK);
             }
 
             info!("Checking if pipeline has an MR");
 
-            let commit_id = pipelinehook.commit.ok_or(StatusCode::OK)?.id.value().to_string();
+            let commit_id = pipelinehook.commit.ok_or(StatusCode::OK)?.id;
             let commit_merge_requests_endpoint = MergeRequests::builder()
                 .project(project_id)
                 .sha(commit_id)
                 .build()
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-            let commit_merge_requests: Vec<MergeRequestType> = commit_merge_requests_endpoint
+            let commit_merge_requests: Vec<MergeRequest> = commit_merge_requests_endpoint
                 .query_async(&state.gitlab_client)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
@@ -109,14 +161,14 @@ async fn webhook(
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
             let endpoint = gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(300));
-            let jobs: Vec<JobType> = endpoint
+            let jobs: Vec<Job> = endpoint
                 .query_async(&state.gitlab_client)
                 .await
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let mut failed = Vec::new();
             for job in jobs {
-                if job.status == StatusState::Failed {
-                    failed.push((job.name.clone(), job.status, job.web_url.clone()));
+                if job.status == "failed" {
+                    failed.push((job.name, job.status, job.web_url));
                 }
             }
 
@@ -139,7 +191,7 @@ async fn webhook(
             }
             slack_message.push_str("Failed jobs\n");
             for (n, s, url) in failed {
-                slack_message.push_str(format!("- <{}|{}> {:?}\n", url, n, s).as_str());
+                slack_message.push_str(format!("- <{}|{}> {}\n", url, n, s).as_str());
             }
 
             let slack_client = &state.slack_client;
@@ -160,14 +212,24 @@ async fn webhook(
 
             Ok(StatusCode::OK)
         }
-        Ok(_) => {
-            info!("Not a pipeline. Skipping.");
-            Ok(StatusCode::OK)
-        }
         Err(err) => {
             error!("Got something unexpected {:?}", err);
             Err(StatusCode::OK)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PipelineHook;
+
+    #[test]
+    fn parses_sample_pipeline_hook() {
+        let payload = include_str!("../pipeline.json");
+        let hook: PipelineHook = serde_json::from_str(payload).unwrap();
+        assert_eq!(hook.object_attributes.status, "failed");
+        assert_eq!(hook.project.id, 3575);
+        assert!(hook.commit.is_some());
     }
 }
 
