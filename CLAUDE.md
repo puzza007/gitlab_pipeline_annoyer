@@ -28,6 +28,8 @@ curl -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
 
 `GITLAB_API_TOKEN`, `GITLAB_API_HOSTNAME`, `SLACK_API_TOKEN`, `SLACK_CHANNEL`. Set `RUST_LOG=info` to see log output.
 
+Dev mode: leaving `GITLAB_API_TOKEN` unset (or empty) connects to GitLab unauthenticated and skips the startup token check; `GITLAB_INSECURE=1` uses http instead of https. Together these allow smoke-testing the full webhook path against a local mock GitLab server without credentials (Slack still needs dummy values set and the final post will fail with `InvalidAuth` — everything before it can be verified from the logs).
+
 ## Architecture
 
 Single axum server on port 3000 with one route: `POST /` handled by `webhook()` in `src/main.rs`. Flow:

@@ -35,6 +35,11 @@ The environment variables required are
 * `SLACK_API_TOKEN`
 * `SLACK_CHANNEL`
 
+For local development, `GITLAB_API_TOKEN` may be left unset to connect
+to GitLab unauthenticated (skipping the startup token check), and
+`GITLAB_INSECURE=1` switches to http — useful for pointing
+`GITLAB_API_HOSTNAME` at a local mock server.
+
 ```shell
 docker-compose up -d
 ```

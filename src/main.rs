@@ -75,14 +75,24 @@ async fn main() -> Result<()> {
     env_logger::init();
 
     info!("Reading env vars...");
-    let gitlab_api_token = env::var("GITLAB_API_TOKEN").expect("Missing GITLAB_API_TOKEN env var");
+    let gitlab_api_token = env::var("GITLAB_API_TOKEN").unwrap_or_default();
     let slack_api_token = env::var("SLACK_API_TOKEN").expect("Missing SLACK_API_TOKEN env var");
     let slack_channel = env::var("SLACK_CHANNEL").expect("Missing SLACK_CHANNEL env var");
     let gitlab_api_hostname =
         env::var("GITLAB_API_HOSTNAME").expect("Missing GITLAB_API_HOSTNAME env var");
 
     info!("Connecting to gitlab...");
-    let gitlab_client = GitlabBuilder::new(&gitlab_api_hostname, gitlab_api_token)
+    let mut gitlab_builder = if gitlab_api_token.is_empty() {
+        warn!("GITLAB_API_TOKEN not set; connecting to gitlab unauthenticated (dev mode)");
+        GitlabBuilder::new_unauthenticated(&gitlab_api_hostname)
+    } else {
+        GitlabBuilder::new(&gitlab_api_hostname, gitlab_api_token)
+    };
+    if env::var("GITLAB_INSECURE").is_ok_and(|v| v == "1") {
+        warn!("GITLAB_INSECURE=1; using http instead of https");
+        gitlab_builder.insecure();
+    }
+    let gitlab_client = gitlab_builder
         .build_async()
         .await
         .context(format!("Couldn't connect to gitlab: {gitlab_api_hostname}"))?;
