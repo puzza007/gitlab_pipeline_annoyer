@@ -3,20 +3,18 @@ use axum::{
     response::IntoResponse, routing::post, Json, Router,
 };
 
+use anyhow::{bail, Context, Result};
 use gitlab::api::projects::pipelines::PipelineJobs;
 use gitlab::api::projects::repository::commits::MergeRequests;
 use gitlab::api::AsyncQuery;
 use gitlab::{AsyncGitlab, GitlabBuilder};
 use serde::Deserialize;
-use slack::chat::PostMessageRequest;
-use slack::users::{InfoRequest, InfoResponse};
-use slack_api as slack;
-use slack_api::User;
 use std::env;
 use std::sync::Arc;
 #[macro_use]
 extern crate log;
-use anyhow::{Context, Result};
+
+const DEFAULT_SLACK_API_URL: &str = "https://slack.com/api";
 
 // The gitlab crate no longer ships webhook payload or API response types;
 // clients are expected to define structs for the fields they use.
@@ -63,11 +61,29 @@ struct UserBrief {
     username: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SlackPostMessageResponse {
+    ok: bool,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackUsersInfoResponse {
+    ok: bool,
+    user: Option<SlackUser>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SlackUser {
+    id: Option<String>,
+}
+
 struct State {
     gitlab_client: AsyncGitlab,
     slack_client: reqwest::Client,
     slack_token: String,
     slack_channel: String,
+    slack_api_url: String,
 }
 
 #[tokio::main]
@@ -80,6 +96,8 @@ async fn main() -> Result<()> {
     let slack_channel = env::var("SLACK_CHANNEL").expect("Missing SLACK_CHANNEL env var");
     let gitlab_api_hostname =
         env::var("GITLAB_API_HOSTNAME").expect("Missing GITLAB_API_HOSTNAME env var");
+    let slack_api_url =
+        env::var("SLACK_API_URL").unwrap_or_else(|_| DEFAULT_SLACK_API_URL.to_string());
 
     info!("Connecting to gitlab...");
     let mut gitlab_builder = if gitlab_api_token.is_empty() {
@@ -97,13 +115,12 @@ async fn main() -> Result<()> {
         .await
         .context(format!("Couldn't connect to gitlab: {gitlab_api_hostname}"))?;
 
-    let slack_client = slack::default_client().unwrap();
-
     let shared_state = Arc::new(State {
         gitlab_client,
-        slack_client,
-        slack_token: slack_api_token.to_string(),
+        slack_client: reqwest::Client::new(),
+        slack_token: slack_api_token,
         slack_channel,
+        slack_api_url,
     });
 
     let app = Router::new()
@@ -111,8 +128,10 @@ async fn main() -> Result<()> {
         .layer(Extension(shared_state));
 
     info!("Starting web server...");
-    axum::Server::bind(&"0.0.0.0:3000".parse().unwrap())
-        .serve(app.into_make_service())
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .context("Couldn't bind to 0.0.0.0:3000")?;
+    axum::serve(listener, app)
         .await
         .context("Couldn't start server on 0.0.0.0:3000")?;
 
@@ -204,18 +223,10 @@ async fn webhook(
                 slack_message.push_str(format!("- <{}|{}> {}\n", url, n, s).as_str());
             }
 
-            let slack_client = &state.slack_client;
-            let slack_token = &state.slack_token;
-            let message_request = PostMessageRequest {
-                channel: &state.slack_channel,
-                text: &slack_message,
-                ..PostMessageRequest::default()
-            };
-
-            slack::chat::post_message(slack_client, slack_token, &message_request)
+            post_slack_message(&state, &slack_message)
                 .await
                 .map_err(|e| {
-                    error!("Slack error {:?}", (e, slack_token, message_request));
+                    error!("Slack error {:?}", e);
                     StatusCode::INTERNAL_SERVER_ERROR
                 })?;
             info!("Slacked: {}", &slack_message);
@@ -226,6 +237,52 @@ async fn webhook(
             error!("Got something unexpected {:?}", err);
             Err(StatusCode::OK)
         }
+    }
+}
+
+async fn post_slack_message(state: &State, text: &str) -> Result<()> {
+    let response: SlackPostMessageResponse = state
+        .slack_client
+        .post(format!("{}/chat.postMessage", state.slack_api_url))
+        .bearer_auth(&state.slack_token)
+        .json(&serde_json::json!({
+            "channel": state.slack_channel,
+            "text": text,
+        }))
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    if !response.ok {
+        bail!(
+            "chat.postMessage failed: {}",
+            response
+                .error
+                .unwrap_or_else(|| "unknown error".to_string())
+        );
+    }
+    Ok(())
+}
+
+async fn get_slack_user_id(state: &State, username: &str) -> String {
+    let response = state
+        .slack_client
+        .get(format!("{}/users.info", state.slack_api_url))
+        .bearer_auth(&state.slack_token)
+        .query(&[("user", username)])
+        .send()
+        .await;
+
+    match response {
+        Ok(response) => match response.json::<SlackUsersInfoResponse>().await {
+            Ok(SlackUsersInfoResponse {
+                ok: true,
+                user: Some(SlackUser { id: Some(id) }),
+            }) => id,
+            _ => username.to_string(),
+        },
+        Err(_) => username.to_string(),
     }
 }
 
@@ -240,22 +297,5 @@ mod tests {
         assert_eq!(hook.object_attributes.status, "failed");
         assert_eq!(hook.project.id, 3575);
         assert!(hook.commit.is_some());
-    }
-}
-
-async fn get_slack_user_id(state: &State, username: &str) -> String {
-    let author_info_request = InfoRequest { user: username };
-    match slack::users::info(
-        &state.slack_client,
-        &state.slack_token,
-        &author_info_request,
-    )
-    .await
-    {
-        Ok(InfoResponse {
-            user: Some(User { id: Some(id), .. }),
-            ..
-        }) => id,
-        _ => username.to_string(),
     }
 }

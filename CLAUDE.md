@@ -28,7 +28,7 @@ curl -v -H 'Content-Type: application/json' -d @pipeline.json localhost:3000
 
 `GITLAB_API_TOKEN`, `GITLAB_API_HOSTNAME`, `SLACK_API_TOKEN`, `SLACK_CHANNEL`. Set `RUST_LOG=info` to see log output.
 
-Dev mode: leaving `GITLAB_API_TOKEN` unset (or empty) connects to GitLab unauthenticated and skips the startup token check; `GITLAB_INSECURE=1` uses http instead of https. Together these allow smoke-testing the full webhook path against a local mock GitLab server without credentials (Slack still needs dummy values set and the final post will fail with `InvalidAuth` — everything before it can be verified from the logs).
+Dev mode: leaving `GITLAB_API_TOKEN` unset (or empty) connects to GitLab unauthenticated and skips the startup token check; `GITLAB_INSECURE=1` uses http instead of https; `SLACK_API_URL` overrides the Slack API base URL (default `https://slack.com/api`). Together these allow smoke-testing the full webhook path — including the Slack post — against a local mock server without any credentials (Slack env vars still need dummy values set).
 
 ## Architecture
 
@@ -37,13 +37,11 @@ Single axum server on port 3000 with one route: `POST /` handled by `webhook()` 
 1. Parse the body as JSON; only hooks with `object_kind: "pipeline"` and status `failed` are processed — everything else returns 200 and is skipped. The webhook payload and GitLab API response types are hand-rolled structs in `main.rs` (the `gitlab` crate removed its typed `webhooks`/`types` modules in 0.1706; clients define their own minimal `Deserialize` structs).
 2. Look up the merge request for the pipeline's commit SHA via the GitLab API; pipelines without an MR are skipped.
 3. Fetch the pipeline's jobs (paged, limit 300) and collect the failed ones.
-4. Build a Slack message and post it via `slack_api` to `SLACK_CHANNEL`.
+4. Build a Slack message and post it to `SLACK_CHANNEL` via plain reqwest calls to the Slack Web API (`chat.postMessage`, `users.info` in `post_slack_message`/`get_slack_user_id`) — there is no Slack client library dependency.
 
 Slack user resolution (`get_slack_user_id`) assumes GitLab and Slack usernames match; if the Slack lookup fails it falls back to the raw username.
 
 Shared state (`GitLab client, Slack client/token/channel`) is passed to the handler via an `Arc<State>` axum Extension.
-
-Note: the `slack_api` dependency is a git fork (`puzza007/slack-rs-api`), not the crates.io release.
 
 ## Deployment
 
