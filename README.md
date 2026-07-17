@@ -35,6 +35,12 @@ The environment variables required are
 * `SLACK_API_TOKEN`
 * `SLACK_CHANNEL`
 
+For local development, `GITLAB_API_TOKEN` may be left unset to connect
+to GitLab unauthenticated (skipping the startup token check),
+`GITLAB_INSECURE=1` switches to http, and `SLACK_API_URL` overrides the
+Slack API base URL — useful for pointing both APIs at a local mock
+server.
+
 ```shell
 docker-compose up -d
 ```

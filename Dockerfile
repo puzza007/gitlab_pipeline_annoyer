@@ -1,8 +1,10 @@
 # Build Stage
-FROM rust:1 as builder
+# Keep the builder's distro in sync with the runtime image below so the
+# binary links against a glibc no newer than the runtime's.
+FROM rust:1-trixie AS builder
 
 RUN USER=root cargo new --bin gitlab_pipeline_annoyer
-WORKDIR ./gitlab_pipeline_annoyer
+WORKDIR /gitlab_pipeline_annoyer
 COPY ./Cargo.toml ./Cargo.toml
 # Build empty app with downloaded dependencies to produce a stable image layer for next build
 RUN cargo build --release
@@ -14,7 +16,7 @@ RUN rm ./target/release/deps/gitlab_pipeline_annoyer*
 RUN cargo build --release
 
 
-FROM debian:11-slim
+FROM debian:13-slim
 ARG APP=/usr/src/app
 
 RUN apt-get update \
